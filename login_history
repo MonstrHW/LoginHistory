@@ -1,0 +1,103 @@
+#!/bin/python3
+
+from datetime import datetime, timedelta
+import subprocess
+import re
+from typing import Optional
+
+COMMAND = ["last", "--time-format", "iso", "--since", "-1month"]
+WARN = "\033[0;31m"
+ENDC = '\033[0m'
+MIN_DIFF_THRESHHOLD = timedelta(hours=1)
+
+def getCommandResult() -> list[str]:
+	result = subprocess.run(COMMAND, capture_output=True, text=True)
+	lines = result.stdout.splitlines()
+	lines = filter(lambda line: "reboot" in line, lines)
+	lines = list(lines)
+	lines.reverse()
+	return lines
+
+def formatDate(date: datetime, format: str="%a %b %d-%m-%Y %H:%M") -> str:
+	return date.strftime(format)
+
+def formatDelta(delta: timedelta) -> str:
+	seconds = int(delta.total_seconds())
+	minutes, seconds = divmod(seconds, 60)
+	hourses, minutes = divmod(minutes, 60)
+	return f"({hourses:02d}:{minutes:02d})"
+
+def formatLoginTime(start: datetime, end: datetime, diff: Optional[timedelta] = None) -> str:
+	s = formatDate(start)
+	e = formatDate(end, "%H:%M")
+	d = formatDelta(end - start if diff is None else diff)
+	return f"{s} - {e} {d}"
+
+def reformatLastLine(line: str) -> str:
+	args = re.split(r" +", line)
+	start = datetime.fromisoformat(args[4])
+	now = datetime.now(start.tzinfo)
+	diff = now - start
+	args[5] = "-"
+	args[6] = now.isoformat()
+	args.append(f"{formatDelta(diff)}")
+	return " ".join(args)
+
+def printMissLoginTimes(start: datetime, end: datetime) -> None:
+	def formatMissLoginTime(date: datetime) -> str:
+		d = formatDate(date, "%a %b %d-%m-%Y")
+		return f"{WARN}{d} - not logged in{ENDC}"
+
+	DAY = timedelta(days=1)
+	while (start + DAY).day != end.day:
+		start += DAY
+		print(formatMissLoginTime(start))
+
+def parseLine(line: str) -> tuple[datetime, datetime]:
+	args = re.split(r" +", line)
+	startTime = datetime.fromisoformat(args[4])
+	endTime = datetime.fromisoformat(args[6])
+	return (startTime, endTime)
+
+def reformat(lines: list[str]) -> None:
+	lines[-1] = reformatLastLine(lines[-1])
+
+	start, end = parseLine(lines[0])
+	i = 1
+	squash = False
+	squashDiffTime = timedelta()
+	squashStartTime = datetime.min
+
+	def printNormalOrSquashedLoginTime() -> None:
+		formatted = ""
+		diff = timedelta()
+		nonlocal squash
+		if squash:
+			squash = False
+			formatted = formatLoginTime(squashStartTime, end, squashDiffTime)
+			diff = squashDiffTime
+		else:
+			formatted = formatLoginTime(start, end)
+			diff = end - start
+		if diff <= MIN_DIFF_THRESHHOLD:
+			formatted = WARN + formatted + ENDC
+		print(formatted)
+
+	while i < len(lines):
+		nextStart, nextEnd = parseLine(lines[i])
+		if start.day == nextStart.day:
+			if not squash:
+				squash = True
+				squashStartTime = start
+				squashDiffTime = end - start
+			squashDiffTime += nextEnd - nextStart
+		else:
+			printNormalOrSquashedLoginTime()
+			printMissLoginTimes(start, nextStart)
+		start, end = nextStart, nextEnd
+		i += 1
+	else:
+		printNormalOrSquashedLoginTime()
+
+lines = getCommandResult()
+reformat(lines)
