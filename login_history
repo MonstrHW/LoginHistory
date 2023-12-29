@@ -1,17 +1,19 @@
 #!/bin/python3
 
 from datetime import datetime, timedelta
+import getopt
 import subprocess
 import re
+import sys
 from typing import Optional
 
-COMMAND = ["last", "--time-format", "iso", "--since", "-1month"]
+COMMAND = ["last", "--time-format", "iso"]
 WARN = "\033[0;31m"
 ENDC = '\033[0m'
 MIN_DIFF_THRESHHOLD = timedelta(hours=1)
 
-def getCommandResult() -> list[str]:
-	result = subprocess.run(COMMAND, capture_output=True, text=True)
+def getCommandResult(args: list[str]) -> list[str]:
+	result = subprocess.run(COMMAND + args, capture_output=True, text=True)
 	lines = result.stdout.splitlines()
 	lines = filter(lambda line: "reboot" in line, lines)
 	lines = list(lines)
@@ -99,5 +101,18 @@ def reformat(lines: list[str]) -> None:
 	else:
 		printNormalOrSquashedLoginTime()
 
-lines = getCommandResult()
-reformat(lines)
+def parseAvailableArgs() -> list[str]:
+	result = []
+	args, _ = getopt.getopt(sys.argv[1:], "s:t:", ["since=", "until="])
+	for arg, val in args:
+		result.append(arg)
+		result.append(val)
+	return result
+	
+def main():
+	args = parseAvailableArgs()
+	lines = getCommandResult(args)
+	reformat(lines)
+
+if __name__ == "__main__":
+	main()
